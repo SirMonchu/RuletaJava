@@ -7,7 +7,6 @@ import javafx.collections.ObservableList;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.geometry.Bounds;
-import javafx.geometry.Point2D;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
@@ -19,6 +18,7 @@ import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
+import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
 import javafx.scene.layout.Region;
 
@@ -29,6 +29,7 @@ import java.util.Random;
 
 public class RuletaController {
 
+    // Componentes de la interfaz
     @FXML
     private HBox lineaDeNumeros;
 
@@ -37,25 +38,6 @@ public class RuletaController {
 
     @FXML
     private Label budgetLabel;
-
-    private List<Text> numerosText;
-    private Rectangle mascara;
-    private boolean animacionEnProgreso;
-
-    private static final int NUMEROS_INICIALES = 24;
-
-    private Thread cuentaAtrasThread;
-    private Thread fondoAnimacionThread;
-
-    private boolean fondoAnimacionEnProgreso;
-
-    private Thread detenerAnimacionThread;
-
-    private Timeline fondoAnimacionTimeline;
-
-    private double budget = 10;
-
-    private int contadorApuestas = 0;
 
     @FXML
     private VBox apuestasContainer;
@@ -66,13 +48,50 @@ public class RuletaController {
     @FXML
     private Label apuestasLabel;
 
+    // Variables de estado
+    private List<Text> numerosText;
+    private Rectangle mascara;
+    private boolean animacionEnProgreso;
+    private boolean fondoAnimacionEnProgreso;
+
+    private static final int NUMEROS_INICIALES = 24;
+
+    private Thread cuentaAtrasThread;
+    private Thread fondoAnimacionThread;
+    private Thread detenerAnimacionThread;
+    private Thread trackingThread;
+
+    private Timeline fondoAnimacionTimeline;
+
+    private double budget = 10;
+    private int contadorApuestas = 0;
+
+    // Objeto para sincronización de presupuesto
     private final Object budgetLock = new Object();
 
+    // Objeto para sincronización de la ruleta
+    private final Object ruletaLock = new Object();
 
     @FXML
     public void initialize() {
         // Crear una lista de Text con los números
         actualizarPresupuesto();
+
+        //Empieza la ruleta
+        empezarRuleta();
+
+        // Inicializa el VBox de las apuestas
+        apuestasContainer.getChildren().clear();
+        contadorApuestas = 0;
+    }
+
+    // Método para actualizar la etiqueta de presupuesto
+    private void actualizarPresupuesto() {
+        Platform.runLater(() -> budgetLabel.setText(budget + " €"));
+    }
+
+    // Método para inicializar la HBox con números y espacios
+    private void inicializarHBox() {
         numerosText = new ArrayList<>();
         for (int i = 0; i <= 36; i++) {
             Text numeroText = new Text(String.valueOf(i));
@@ -91,20 +110,6 @@ public class RuletaController {
 
         // Mezclar la lista de Texts inicialmente
         Collections.shuffle(numerosText);
-
-        // Inicialmente, agrega los Texts y espacios a la HBox
-        inicializarHBox();
-
-        // Inicializa el VBox de las apuestas
-        apuestasContainer.getChildren().clear();
-        contadorApuestas = 0;
-    }
-
-    private void actualizarPresupuesto() {
-        budgetLabel.setText(budget + " €");
-    }
-
-    private void inicializarHBox() {
         for (Text numeroText : numerosText) {
             Region espacio = new Region();
             espacio.setMinWidth(20); // Ajusta la distancia entre los números
@@ -117,6 +122,12 @@ public class RuletaController {
 
     @FXML
     public void empezarRuleta() {
+        // Limpiar todos los números actuales antes de iniciar la cuenta atrás
+        Platform.runLater(() -> {
+            lineaDeNumeros.getChildren().clear();
+            inicializarHBox();
+        });
+
         // Iniciar la cuenta atrás en un hilo separado
         cuentaAtrasThread = new Thread(() -> cuentaAtras());
         cuentaAtrasThread.setDaemon(true);
@@ -135,6 +146,7 @@ public class RuletaController {
         detenerAnimacionThread.start();
     }
 
+    // Metodo para detener la animacion despues de un tiempo aleatorio
     private void detenerAnimacionDespuesDeTiempo() {
         Random random = new Random();
         int tiempoAleatorio = (int) ((random.nextDouble() * (29.6 - 24) + 24) * 1000);
@@ -146,71 +158,97 @@ public class RuletaController {
             Thread.currentThread().interrupt();
         }
         System.out.println("AHORA SE DETIENE LA RULETA");
+        animacionEnProgreso = false;
         // Detener la animación
         detenerRuleta();
     }
 
+    // Método para detener la animación de la ruleta
     @FXML
     public void detenerRuleta() {
-        animacionEnProgreso = false;
-        // Obtener el número ganador cuando se detiene la animación
-        int numeroGanador = obtenerNumeroGanador();
+        synchronized (ruletaLock) {
+            animacionEnProgreso = false;
 
-        // Verificar si el número ganador está dentro de la zona ganadora
-        if (esNumeroEnZonaGanadora(numeroGanador)) {
-            System.out.println("¡Has ganado!");
-            // Realizar acciones adicionales si el número está en la zona ganadora
-        } else {
+            // Detener el temporizador de fondo de animación
+            if (fondoAnimacionTimeline != null) {
+                fondoAnimacionTimeline.stop();
+            }
+
+            // Detener el hilo de detener animación
+            if (detenerAnimacionThread != null && detenerAnimacionThread.isAlive()) {
+                detenerAnimacionThread.interrupt();
+            }
+
+            // Obtener el número ganador cuando se detiene la animación
+            int numeroGanador = obtenerNumeroGanador();
             System.out.println("Número ganador: " + numeroGanador);
-            // Realizar acciones adicionales si el número no está en la zona ganadora
-        }
-        // Detener el temporizador de fondo de animación
-        if (fondoAnimacionTimeline != null) {
-            fondoAnimacionTimeline.stop();
-        }
 
-        // Detener el hilo de detener animación
-        if (detenerAnimacionThread != null && detenerAnimacionThread.isAlive()) {
-            detenerAnimacionThread.interrupt();
+            // Limpiar apuestas después de obtener el número ganador
+            Platform.runLater(() -> limpiarApuestas());
+
+            // Verificar apuestas y ajustar presupuesto
+            verificarApuestas(numeroGanador);
+
+            // Espera para mostrar resultado
+            esperaDeResultado();
         }
     }
 
+    private void esperaDeResultado() {
+        Thread esperaThread = new Thread(() -> {
+            try {
+                Thread.sleep(5000); // Pausa de 5 segundos
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
+            // Iniciar un nuevo ciclo
+            Platform.runLater(() -> empezarRuleta());
+        });
+
+        esperaThread.setDaemon(true);
+        esperaThread.start();
+    }
+
+    // Método para obtener el número ganador en función de la posición
     private int obtenerNumeroGanador() {
         double zonaGanadoraX = 248.0;
         double zonaGanadoraY = 228.0;
-        double zonaGanadoraWidth = 42.0;
-        double zonaGanadoraHeight = 42.0;
+        double zonaGanadoraWidth = 22.0;
+        double zonaGanadoraHeight = 22.0;
 
+        double distanciaMinima = Double.MAX_VALUE;
+        int numeroGanador = -1;
+
+        // Obtener el número de la escena en lugar de usar localToScene
+        ObservableList<Node> children = lineaDeNumeros.getChildren();
         for (int i = 0; i < numerosText.size(); i++) {
-            // Utilizar localToParent para obtener las coordenadas en la líneaDeNumeros
-            double numeroCenterXInLineaDeNumeros = numerosText.get(i).localToParent(numerosText.get(i).getBoundsInLocal().getCenterX(),
-                    numerosText.get(i).getBoundsInLocal().getCenterY()).getX();
-            double numeroCenterYInLineaDeNumeros = numerosText.get(i).localToParent(numerosText.get(i).getBoundsInLocal().getCenterX(),
-                    numerosText.get(i).getBoundsInLocal().getCenterY()).getY();
+            Text numeroText = numerosText.get(i);
 
-            // Imprimir las coordenadas
-            System.out.println("Número " + i + ": " + numeroCenterXInLineaDeNumeros + ", " + numeroCenterYInLineaDeNumeros);
+            // Obtener las coordenadas globales del número actual
+            Bounds bounds = numeroText.localToScene(numeroText.getBoundsInLocal());
 
             // Verificar si el área del número intersecta con el área de la zona ganadora
-            if (numerosText.get(i).getBoundsInParent().intersects(
-                    zonaGanadoraX, zonaGanadoraY, zonaGanadoraWidth, zonaGanadoraHeight)) {
-                return i;
+            if (bounds.intersects(zonaGanadoraX, zonaGanadoraY, zonaGanadoraWidth, zonaGanadoraHeight)) {
+                // Calcular la distancia al centro de la zona ganadora
+                double centroX = bounds.getMinX() + bounds.getWidth() / 2.0;
+                double centroY = bounds.getMinY() + bounds.getHeight() / 2.0;
+                double distancia = Math.sqrt(Math.pow(zonaGanadoraX + zonaGanadoraWidth / 2.0 - centroX, 2) + Math.pow(zonaGanadoraY + zonaGanadoraHeight / 2.0 - centroY, 2));
+
+                // Actualizar el número ganador y la distancia mínima si esta distancia es menor
+                if (distancia < distanciaMinima) {
+                    distanciaMinima = distancia;
+                    numeroGanador = i;
+                }
             }
         }
-        return -1;
+
+        System.out.println("Número ganador: " + numeroGanador);
+
+        return numeroGanador;
     }
 
-    private boolean esNumeroEnZonaGanadora(int numero) {
-        double zonaGanadoraX = 248.0;
-        double zonaGanadoraY = 228.0;
-        double zonaGanadoraWidth = 42.0;
-        double zonaGanadoraHeight = 42.0;
-
-        // Verificar si el área del número intersecta con el área de la zona ganadora
-        return numerosText.get(numero).getBoundsInParent().intersects(
-                zonaGanadoraX, zonaGanadoraY, zonaGanadoraWidth, zonaGanadoraHeight);
-    }
-
+    // Método para la cuenta atrás antes de iniciar la animación
     private void cuentaAtras() {
         int[] segundos = {20};
 
@@ -227,14 +265,17 @@ public class RuletaController {
 
         // Al finalizar la cuenta atrás, iniciar la animación
         Platform.runLater(() -> {
-            animacionEnProgreso = true;
-            int[] iteraciones = {0};
-            Thread animationThread = new Thread(() -> animarNumeros(iteraciones));
-            animationThread.setDaemon(true);
-            animationThread.start();
+            synchronized (ruletaLock) {
+                animacionEnProgreso = true;
+                int[] iteraciones = {0};
+                Thread animationThread = new Thread(() -> animarNumeros(iteraciones));
+                animationThread.setDaemon(true);
+                animationThread.start();
+            }
         });
     }
 
+    // Método para la animación de fondo
     private void fondoAnimacion() {
         Random random = new Random();
 
@@ -243,8 +284,7 @@ public class RuletaController {
 
         fondoAnimacionTimeline = new Timeline(new KeyFrame(javafx.util.Duration.millis(duracionAleatoria), (ActionEvent event) -> {
             Platform.runLater(() -> {
-                // Lógica para el fondo de animación (puedes adaptar esto según tus necesidades)
-                // ...
+
             });
 
             // Reiniciar la animación
@@ -255,6 +295,7 @@ public class RuletaController {
         fondoAnimacionTimeline.play();
     }
 
+    // Método para animar los números en la ruleta
     private void animarNumeros(int[] iteraciones) {
         while (animacionEnProgreso) {
             try {
@@ -274,6 +315,7 @@ public class RuletaController {
         }
     }
 
+    // Método para mover los números en la ruleta
     private void moverNumeros() {
         // Mover cada Text y espacio a la izquierda
         for (int i = 0; i < lineaDeNumeros.getChildren().size(); i += 2) {
@@ -285,6 +327,7 @@ public class RuletaController {
         }
     }
 
+    // Método llamado al hacer clic en un botón de apuesta
     @FXML
     private void onButtonClick(ActionEvent event) {
         if (budget >= 0.10 && !animacionEnProgreso && contadorApuestas < 10) {
@@ -300,14 +343,11 @@ public class RuletaController {
             String apuesta = obtenerDescripcionApuesta(buttonNumber, cantidadApostada);
             mostrarApuesta(apuesta);
 
-            // No es necesario reducir la cantidad apostada del presupuesto aquí, ya que se hizo en restarMoneda
-            // budget -= cantidadApostada;
-
             actualizarPresupuesto();
         }
     }
 
-
+    // Método para obtener la descripción de la apuesta
     private String obtenerDescripcionApuesta(int numero, double cantidadApostada) {
         String color = (numero % 2 == 0) ? "rojo" : "negro";
         String paridad = (numero % 2 == 0) ? "par" : "impar";
@@ -316,6 +356,7 @@ public class RuletaController {
         return numero + " " + color + " " + paridad + " - " + cantidadApostada + "€";
     }
 
+    // Método para mostrar la apuesta en la interfaz
     private void mostrarApuesta(String apuesta) {
         // Verificar si ya hay una apuesta para el mismo número
         for (Node node : apuestasContainer.getChildren()) {
@@ -337,15 +378,52 @@ public class RuletaController {
 
         // Si no hay una apuesta existente para el mismo número, agregar una nueva entrada
         Label labelApuesta = new Label(apuesta);
+        labelApuesta.setTextFill(Color.WHITE);
+        labelApuesta.setFont(Font.font("Arial", FontWeight.BOLD, 16));
         apuestasContainer.getChildren().add(labelApuesta);
         contadorApuestas++;
     }
 
+    // Método para restar la cantidad apostada del presupuesto
     private void restarMoneda(double cantidad) {
         synchronized (budgetLock) {
             budget = Math.max(budget - cantidad, 0.0); // Asegurarse de que el presupuesto no sea negativo
         }
     }
 
-}
+    // Método para limpiar las apuestas
+    private void limpiarApuestas() {
+        apuestasContainer.getChildren().clear();
+        contadorApuestas = 0;
+    }
 
+    // Método para verificar las apuestas y ajustar el presupuesto
+    private void verificarApuestas(int numeroGanador) {
+        synchronized (budgetLock) {
+            ObservableList<Node> children = apuestasContainer.getChildren();
+            List<Node> copiaApuestas = new ArrayList<>(children);  // Crear una copia de la lista
+
+            for (Node node : copiaApuestas) {
+                if (node instanceof Label) {
+                    Label label = (Label) node;
+                    String apuesta = label.getText();
+                    int numeroApostado = Integer.parseInt(apuesta.split(" ")[0]);
+                    System.out.println(apuesta);
+                    System.out.println(numeroApostado);
+                    // Verificar si el número ganador está contenido en la apuesta
+                    if (apuesta.contains(String.valueOf(numeroGanador))) {
+                        // El usuario apostó a un número que incluye al número ganador
+                        double cantidadApostada = Double.parseDouble(apuesta.substring(apuesta.lastIndexOf(" ") + 1, apuesta.indexOf("€")));
+                        double ganancia = cantidadApostada * 35;
+
+                        // Ajustar el presupuesto con la ganancia
+                        budget += cantidadApostada + ganancia;
+
+                        // Actualizar la etiqueta de presupuesto
+                        actualizarPresupuesto();
+                    }
+                }
+            }
+        }
+    }
+}
