@@ -93,9 +93,17 @@ public class RuletaController {
     // Método para inicializar la HBox con números y espacios
     private void inicializarHBox() {
         numerosText = new ArrayList<>();
+
+        Color[] colores = {
+                Color.GREEN, Color.RED, Color.BLACK, Color.RED, Color.BLACK, Color.RED, Color.BLACK, Color.RED, Color.BLACK, Color.RED,
+                Color.BLACK, Color.BLACK, Color.RED, Color.BLACK, Color.RED, Color.BLACK, Color.RED, Color.BLACK, Color.RED, Color.RED,
+                Color.BLACK, Color.RED, Color.BLACK, Color.RED, Color.BLACK, Color.RED, Color.BLACK, Color.RED, Color.BLACK, Color.BLACK,
+                Color.RED, Color.BLACK, Color.RED, Color.BLACK, Color.RED, Color.BLACK, Color.RED
+        };
+
         for (int i = 0; i <= 36; i++) {
             Text numeroText = new Text(String.valueOf(i));
-            numeroText.setFill((i == 0) ? Color.GREEN : (i % 2 == 0) ? Color.RED : Color.BLACK);
+            numeroText.setFill(colores[i]);
             numeroText.setFont(new Font(40)); // Ajusta el tamaño de la fuente
             numerosText.add(numeroText);
         }
@@ -337,7 +345,26 @@ public class RuletaController {
             restarMoneda(cantidadApostada);
 
             Button clickedButton = (Button) event.getSource();
-            int buttonNumber = Integer.parseInt(clickedButton.getId().substring(6)); // Obtener el número del botón
+            int buttonNumber;
+
+            // Convertir el texto del botón a un número
+            switch (clickedButton.getText().toLowerCase()) {
+                case "rojas":
+                    buttonNumber = 37;
+                    break;
+                case "negras":
+                    buttonNumber = 38;
+                    break;
+                case "par":
+                    buttonNumber = 39;
+                    break;
+                case "impar":
+                    buttonNumber = 40;
+                    break;
+                default:
+                    buttonNumber = Integer.parseInt(clickedButton.getText());
+                    break;
+            }
 
             // Lógica adicional según el botón presionado
             String apuesta = obtenerDescripcionApuesta(buttonNumber, cantidadApostada);
@@ -352,8 +379,29 @@ public class RuletaController {
         String color = (numero % 2 == 0) ? "rojo" : "negro";
         String paridad = (numero % 2 == 0) ? "par" : "impar";
 
+        String tipoApuesta;
+        switch (numero) {
+            case 37:
+                tipoApuesta = "red";
+                break;
+            case 38:
+                tipoApuesta = "black";
+                break;
+            case 39:
+                tipoApuesta = "even";
+                break;
+            case 40:
+                tipoApuesta = "odd";
+                break;
+            default:
+                tipoApuesta = "number";
+                break;
+        }
+
         // Actualiza el texto de las apuestas
-        return numero + " " + color + " " + paridad + " - " + cantidadApostada + "€";
+        return (tipoApuesta.equals("number"))
+                ? numero + " " + color + " " + paridad + " - " + cantidadApostada + "€"
+                : tipoApuesta + " - " + cantidadApostada + "€";
     }
 
     // Método para mostrar la apuesta en la interfaz
@@ -407,23 +455,55 @@ public class RuletaController {
                 if (node instanceof Label) {
                     Label label = (Label) node;
                     String apuesta = label.getText();
-                    int numeroApostado = Integer.parseInt(apuesta.split(" ")[0]);
-                    System.out.println(apuesta);
-                    System.out.println(numeroApostado);
-                    // Verificar si el número ganador está contenido en la apuesta
-                    if (apuesta.contains(String.valueOf(numeroGanador))) {
-                        // El usuario apostó a un número que incluye al número ganador
-                        double cantidadApostada = Double.parseDouble(apuesta.substring(apuesta.lastIndexOf(" ") + 1, apuesta.indexOf("€")));
-                        double ganancia = cantidadApostada * 35;
+                    double cantidadApostada = Double.parseDouble(apuesta.substring(apuesta.lastIndexOf(" ") + 1, apuesta.indexOf("€")));
+                    double ganancia = 0;
 
-                        // Ajustar el presupuesto con la ganancia
-                        budget += cantidadApostada + ganancia;
-
-                        // Actualizar la etiqueta de presupuesto
-                        actualizarPresupuesto();
+                    if (apuesta.startsWith("red")) {
+                        // Apuesta por rojo (números 1, 3, 5, ..., 36)
+                        if (esNumeroRojo(numeroGanador)) {
+                            ganancia = cantidadApostada * 1.5;
+                        }
+                    } else if (apuesta.startsWith("black")) {
+                        // Apuesta por negro (números 2, 4, 6, ..., 35)
+                        if (!esNumeroRojo(numeroGanador) && numeroGanador != 0) {
+                            ganancia = cantidadApostada * 1.5;
+                        }
+                    } else if (apuesta.startsWith("even")) {
+                        // Apuesta por pares
+                        if (numeroGanador % 2 == 0 && numeroGanador != 0) {
+                            ganancia = cantidadApostada * 1.5;
+                        }
+                    } else if (apuesta.startsWith("odd")) {
+                        // Apuesta por impares
+                        if (numeroGanador % 2 != 0) {
+                            ganancia = cantidadApostada * 1.5;
+                        }
+                    } else {
+                        // Apuesta por un número específico
+                        int numeroApostado = Integer.parseInt(apuesta.split(" ")[0]);
+                        if (numeroApostado == numeroGanador) {
+                            ganancia = cantidadApostada * 35;
+                        }
                     }
+
+                    // Ajustar el presupuesto con la ganancia
+                    budget += ganancia;
+
+                    // Actualizar la etiqueta de presupuesto
+                    actualizarPresupuesto();
                 }
             }
         }
+    }
+
+    private boolean esNumeroRojo(int numero) {
+        // Verificar si el número es rojo
+        int[] numerosRojos = {1, 3, 5, 7, 9, 12, 14, 16, 18, 21, 23, 25, 27, 30, 32, 34, 36};
+        for (int numRojo : numerosRojos) {
+            if (numRojo == numero) {
+                return true;
+            }
+        }
+        return false;
     }
 }
